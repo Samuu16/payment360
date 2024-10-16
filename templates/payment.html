@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Payment</title>
+</head>
+<body>
+    <div class="container">
+        <h2>Complete Your Payment</h2>
+        <input type="hidden" id="amount" value="">
+        <button id="pay-button" class="btn btn-primary">Pay Now</button>
+    </div>
+
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const plan = urlParams.get('plan');
+        const planAmounts = {
+            'basic': 1000,    // Amount in paise for $10
+            'pro': 2500,      // Amount in paise for $25
+            'enterprise': 5000 // Amount in paise for $50
+        };
+
+        document.getElementById('amount').value = planAmounts[plan];
+
+        document.getElementById('pay-button').onclick = async function() {
+            const amount = document.getElementById('amount').value;
+
+            const response = await fetch('/payment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({ plan: plan })
+            });
+
+            const order = await response.json();
+
+            // Initialize Razorpay payment
+            const options = {
+                key: 'rzp_live_sgu575Zc8oft1H', // Enter the Key ID generated from the Dashboard
+                amount: order.amount * 100, // Amount in paise
+                currency: 'INR',
+                name: 'Your Company Name',
+                description: 'Payment for ' + plan.charAt(0).toUpperCase() + plan.slice(1) + ' Plan',
+                order_id: order.id, // Pass the order ID
+                handler: function (response) {
+                    alert(`Payment successful! Payment ID: ${response.razorpay_payment_id}`);
+                },
+                prefill: {
+                    name: 'Customer Name',
+                    email: 'customer@example.com',
+                    contact: '9999999999'
+                },
+                theme: {
+                    color: '#F37254'
+                }
+            };
+            const rzp = new Razorpay(options);
+            rzp.open();
+        };
+    </script>
+</body>
+</html>
