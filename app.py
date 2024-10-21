@@ -3,9 +3,9 @@
 
 
 
-
+from fpdf import FPDF
 from sqlite3 import IntegrityError
-from flask import Flask, request,send_file, render_template, redirect, session, url_for, jsonify,flash
+from flask import Flask, request,send_file, render_template, redirect, session, url_for, jsonify,flash, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import bcrypt
@@ -39,22 +39,97 @@ from flask import Response
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
- 
+from dotenv import load_dotenv
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine, Column, Integer, String, Float, Date
 
 from sqlalchemy import Table, Column, Integer, String, DateTime, Float, MetaData
-import stripe
+
+
+
+# Load environment variables from .env file
 
 # Instantiate Flask application
 app = Flask(__name__)
+
+# Read environment variables
+server = os.getenv('SQL_SERVER')
+database = os.getenv('SQL_DATABASE')
+username = os.getenv('SQL_USER')
+password = os.getenv('SQL_PASSWORD')
+driver = os.getenv('SQL_DRIVER', 'ODBC Driver 18 for SQL Server')
+encrypt = os.getenv('SQL_ENCRYPT', 'yes')
+trust_cert = os.getenv('SQL_TRUST_SERVER_CERTIFICATE', 'no')
+timeout = os.getenv('SQL_CONNECTION_TIMEOUT', '30')
+
+# Print password partially for security
+
+# Construct the connection string
+params = urllib.parse.quote_plus("Driver={ODBC Driver 18 for SQL Server};Server=tcp:demopay.database.windows.net,1433;Database=mydemo;Uid=samiksha;Pwd=Sneha@12;Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;")
+
+app.config['SQLALCHEMY_DATABASE_URI'] = f'mssql+pyodbc:///?odbc_connect={params}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-db = SQLAlchemy(app)
-app.secret_key = 'secret_key'
+# Print the constructed connection string for debugging purposes
+print(f"Connection String: {app.config['SQLALCHEMY_DATABASE_URI']}")
 
+db = SQLAlchemy(app)
+app.secret_key='secret_key'
+
+# Function to check database connection
+def check_database_connection():
+    # Define the connection string for pyodbc
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        "SERVER=tcp:demopay.database.windows.net,1433;"
+        "DATABASE=mydemo;"
+        "UID=samiksha;"
+        "PWD=Sneha@12;"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
+    )
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1')
+        row = cursor.fetchone()
+        if row and len(row) > 0:
+            print("Database connection successful.")
+            return True
+        else:
+            print("Database returned empty result.")
+            return False
+    except pyodbc.Error as e:
+        print(f"PyODBC error: {str(e)}")
+        print("Failed to connect using pyodbc.")
+        return False
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
+        
+# Health check endpoint
+@app.route('/health')
+def health_check():
+    # Check database connection
+    print("Checking database health...")
+    is_database_connected = check_database_connection()
+
+    if is_database_connected:
+        return jsonify(status="OK", message="Database connection is healthy"), 200
+    else:
+        return jsonify(status="Error", message="Database connection failed"), 500
+    
+ # Route to serve the favicon
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, 'static'),
+                               'favicon.ico', mimetype='image/vnd.microsoft.icon')   
+    
 # Initialize Razorpay client
 razorpay_client = razorpay.Client(auth=("rzp_test_ACrGseKtLUbHjF", "vN3xXrCa8YMZSyZ2iomsyBQX"))
 
@@ -1649,22 +1724,93 @@ def payment():
         elif plan == 'pro':
             amount = 2500  # Amount in paise for $25
         elif plan == 'enterprise':
-            amount = 5000  # Amount in paise for $50
+            amount = 5000 # Amount in paise for $50
         
         # Create an order with Razorpay
         order_data = {
             'amount': amount,
             'currency': 'INR',
-            'payment_capture': '1'
+            'payment_capture': '0'
         }
         order = razorpay_client.order.create(data=order_data)
         return jsonify({'id': order['id'], 'amount': amount / 100})  # return order ID and amount in INR
 
     return render_template('payment.html')
 
+@app.route('/check-payment-status', methods=['GET'])
+def check_payment_status():
+    payment_id = request.args.get('payment_id')
+    payment_details = razorpay_client.payment.fetch(payment_id)
+    
+    return jsonify({'status': payment_details['status']})
 
+
+@app.route('/payment_success', methods=['GET'])
+def payment_success():
+    # Assuming transaction details are passed via query parameters
+    transaction_id = request.args.get('transaction_id')
+    order_id = request.args.get('order_id')
+    amount = request.args.get('amount')
+    payment_method = "Razorpay"  # You can modify this if necessary
+    
+    # Render success page with transaction details
+    return render_template('payment_success.html', transaction_id=transaction_id, order_id=order_id, amount=amount, payment_method=payment_method)
+
+
+
+
+
+
+
+@app.route('/download_receipt', methods=['GET'])
+def download_receipt():
+    # Assuming you pass transaction details as query parameters or fetch from a database
+    transaction_id = request.args.get('transaction_id')
+    amount = request.args.get('amount')
+    payment_method = request.args.get('payment_method')
+
+    # Create a PDF receipt
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Title
+    pdf.set_font("Arial", 'B', 16)  # Bold font for the title
+    pdf.cell(0, 10, 'Payment Receipt', 0, 1, 'C')
+    
+    # Add some space
+    pdf.ln(10)
+
+    # Set font for details
+    pdf.set_font("Arial", size=12)
+    
+    # Draw borders around the transaction details
+    pdf.set_line_width(0.5)
+    pdf.set_draw_color(0, 0, 0)  # Black border
+    pdf.rect(10, 30, 190, 60)  # Adjust the position and size as needed
+
+    # Add transaction details inside the border
+    pdf.set_y(35)  # Set the Y position to start inside the border
+    pdf.cell(0, 10, f"Transaction ID: {transaction_id}", 0, 1, 'L')
+    pdf.cell(0, 10, f"Amount: INR {amount}", 0, 1, 'L')
+    pdf.cell(0, 10, f"Payment Method: {payment_method}", 0, 1, 'L')
+    pdf.cell(0, 10, "Status: Success", 0, 1, 'L')
+
+    # Centered Thank You Message
+    pdf.ln(10)  # Add some space before the thank you message
+    pdf.set_font("Arial", 'B', 14)  # Bold font for the thank you message
+    pdf.cell(0, 10, "Thank you for your payment!", 0, 1, 'C')  # Center the message
+
+    # Footer
+    pdf.set_y(-40)  # Move below the last entry
+    pdf.set_font("Arial", 'I', 10)  # Italic font for footer
+    pdf.cell(0, 10, 'If you have any questions, please contact support@yourcompany.com', 0, 1, 'C')
+    
+    # Create a file-like object to send the PDF
+    pdf_output = io.BytesIO()
+    pdf.output(pdf_output)
+    pdf_output.seek(0)
+
+    return send_file(pdf_output, as_attachment=True, download_name=f'receipt_{transaction_id}.pdf', mimetype='application/pdf')
 
 if __name__ == '__main__':
-    print("Starting Flask app on port 8000")
     app.run(debug=True, host='0.0.0.0', port=8000)
-
