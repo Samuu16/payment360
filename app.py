@@ -56,7 +56,7 @@ db = SQLAlchemy(app)
 app.secret_key = 'secret_key'
 
 # Initialize Razorpay client
-razorpay_client = razorpay.Client(auth=("rzp_live_sgu575Zc8oft1H", "QyZdN0Hg13dP33EboalDZusW"))
+razorpay_client = razorpay.Client(auth=("rzp_test_ACrGseKtLUbHjF", "vN3xXrCa8YMZSyZ2iomsyBQX"))
 
 Base = declarative_base()
 # Define conversion table
